@@ -1,0 +1,148 @@
+MODEL:
+  PRETRAIN_CHOICE: 'imagenet'
+  METRIC_LOSS_TYPE: 'triplet'
+  IF_LABELSMOOTH: 'on'
+  IF_WITH_CENTER: 'no'
+  NAME: 'ViT-B-16'
+  STRIDE_SIZE: [16, 16]
+  ID_LOSS_WEIGHT : 0.25 
+  TRIPLET_LOSS_WEIGHT : 1.0
+  I2T_LOSS_WEIGHT : 1.0
+#  SIE_CAMERA:  True 
+  SIE_CAMERA:  False 
+  STANDARD_METRIC: True
+ # CLOTH_METRIC: True
+  SIE_COE : 1.0
+
+INPUT:
+  SIZE_TRAIN: [256, 128]
+  SIZE_TEST: [256, 128]
+  PROB: 0.5 # random horizontal flip
+  RE_PROB: 0.5 # random erasing
+  PADDING: 10
+  PIXEL_MEAN: [0.5, 0.5, 0.5]
+  PIXEL_STD: [0.5, 0.5, 0.5]
+
+DATALOADER:
+  SAMPLER: 'softmax_triplet'
+  NUM_INSTANCE: 4
+  NUM_WORKERS: 8
+
+SOLVER:
+  STAGE1:
+    IMS_PER_BATCH: 64
+    OPTIMIZER_NAME: "Adam"
+    BASE_LR: 0.00035
+    WARMUP_LR_INIT: 0.00001
+    LR_MIN: 1e-6
+    WARMUP_METHOD: 'linear'
+    WEIGHT_DECAY:  1e-4
+    WEIGHT_DECAY_BIAS: 1e-4
+    MAX_EPOCHS: 1
+    #CHECKPOINT_PERIOD: 120
+    CHECKPOINT_PERIOD: 120
+    LOG_PERIOD: 200
+    WARMUP_EPOCHS: 5
+  
+  STAGE2:
+    IMS_PER_BATCH: 64
+    OPTIMIZER_NAME: "Adam"
+    BASE_LR: 0.000005
+    WARMUP_METHOD: 'linear'
+    WARMUP_ITERS: 10
+    WARMUP_FACTOR: 0.1
+    WEIGHT_DECAY:  0.0001
+    WEIGHT_DECAY_BIAS: 0.0001
+    LARGE_FC_LR: False
+    MAX_EPOCHS: 60
+    CHECKPOINT_PERIOD: 60
+    LOG_PERIOD: 200
+    EVAL_PERIOD:  5 
+    
+    STEPS: [30, 50]
+    GAMMA: 0.1
+  
+TEST:
+  EVAL: True
+  IMS_PER_BATCH: 64
+  RE_RANKING: False
+  WEIGHT: '/home/rxn/myproject/clip-improvements/modelpth/cargo/vit-clip-weightlocal_rl/ViT-B-16_60.pth'
+  NECK_FEAT: 'before'
+  FEAT_NORM: 'yes'
+
+DATASETS:
+#   NAMES: ('uav')
+#   NAMES: ('prai')
+#    'cargo_aa'
+#    'cargo_gg'
+#    'cargo_ag'
+   NAMES: ('cargo_aa')
+   ROOT_DIR: ('/home/cncert')
+#OUTPUT_DIR: '/home/rxn/myproject/clip-improvements/modelpth/cargo/vit-clip-1-16shuffle248_rl_mulultiprompts'
+#OUTPUT_DIR: '/home/rxn/myproject/clip-improvements/modelpth/cargoag/vit-clip-1-16dshuffle248_rl_mulultiprompts'
+OUTPUT_DIR: '/home/rxn/myproject/clip-improvements/modelpth/cargoaa/vit-clip-1-8dshuffle248_rl_mulultiprompts'
+#OUTPUT_DIR: '/home/rxn/myproject/clip-improvements/modelpth/cargoag/vit-clip-shuffle_rl_mulultiprompts'
+#zhi qian shi yan de weight save position
+#OUTPUT_DIR: '/home/rxn/myproject/clip-improvements/modelpth/cargogg/vit-clip-weightlocal_rl'
+#OUTPUT_DIR: '/home/rxn/myproject/clip-improvements/modelpth/cargoaa/vit-clip-policy_rl'
+#OUTPUT_DIR: '/home/rxn/myproject/clip-improvements/modelpth/cargoag/vit-clip-weightlocal_rl'
+#OUTPUT_DIR: '/home/rxn/myproject/clip-improvements/modelpth/cargoaa/vit-clip-weightlocal_rl'
+#OUTPUT_DIR: '/home/rxn/myproject/clip-improvements/modelpth/cargo/vit-clip-weightlocal_rl'
+#OUTPUT_DIR: '/home/rxn/myproject/clip-improvements/modelpth/cargo/vit-clip-weightlocal_rl_camera'
+#OUTPUT_DIR: '/home/rxn/myproject/clip-improvements/modelpth/cargo/vit-clip-weightlocal_lambdarcls'
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#OUTPUT_DIR: '/home/rxn/myproject/CLIP-ReID-master/modelpth/prai/vit-clip-weightlocal'
+#OUTPUT_DIR: '/home/rxn/myproject/clip-improvements/modelpth/prai/vit-clip-weightlocal_rl'
+#OUTPUT_DIR: '/home/rxn/myproject/clip-improvements/modelpth/uavhuman/vit-clip-weightlocal_rl'
+#OUTPUT_DIR: '/home/rxn/myproject/CLIP-ReID-master/modelpth/uavhuman/clip_local3_33_33_3_global_feat_5i2tces'
+#OUTPUT_DIR: '/home/rxn/myproject/CLIP-ReID-master/modelpth/uavhuman/clip_weightlocal'
+
+#   NAMES: ('race')
+#   ROOT_DIR: ('/home/cncert/')
+#OUTPUT_DIR: '/home/rxn/myproject/CLIP-ReID-master/modelpth/race/vit-clip-no_view_emb'
+#   NAMES: ('agreidv2')
+#   NAMES: ('agreid')
+#   ROOT_DIR: ('/home/cncert/AG-ReIDv2')
+#   ROOT_DIR: ('/home/cncert/AG-ReID')
+#OUTPUT_DIR: '/home/rxn/myproject/CLIP-ReID-master/modelpth/agreidv2/vit-clip-id_instance_prompt'
+#OUTPUT_DIR: '/home/rxn/myproject/CLIP-ReID-master/modelpth/prai/vit-clip-weightlocal'
+#   NAMES: ('ltcc')
+#   ROOT_DIR: ('/home/cncert')
+#OUTPUT_DIR: '/home/rxn/myproject/CLIP-ReID-master/modelpth/ltcc/vit-clip'
+#   NAMES: ('market1501')
+#   ROOT_DIR: ('')
+# OUTPUT_DIR: ''
+
+#   NAMES: ('dukemtmc')
+#   ROOT_DIR: ('')
+# OUTPUT_DIR: ''
+
+#   NAMES: ('occ_duke')
+#   ROOT_DIR: ('')
+# OUTPUT_DIR: ''
+
+#   NAMES: ('msmt17')
+#   ROOT_DIR: ('')
+# OUTPUT_DIR: ''
+
+# CUDA_VISIBLE_DEVICES=3 python train_clipreid.py --config_file configs/person/vit_clipreid.yml

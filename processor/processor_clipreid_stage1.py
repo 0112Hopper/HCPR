@@ -1,0 +1,154 @@
+import logging
+import os
+import torch
+import torch.nn as nn
+from utils.meter import AverageMeter
+from torch.cuda import amp
+import torch.distributed as dist
+import collections
+from torch.nn import functional as F
+from loss.supcontrast import SupConLoss
+from loss.multipositive import MultiPositiveLoss
+from loss.plataware import PlatformAwareLoss
+from loss.clipbatch import symmetric_clip_loss_batch_pairing
+def compute_projection( A, B):
+    """计算A在B上的投影"""
+    # 当A和B都是2D时处理batch维度
+    if A.dim() == 2 and B.dim() == 2:
+        # A: [*, d], B: [*, d]
+        B_norm = B / (B.norm(dim=-1, keepdim=True) + 1e-8)
+        proj_len = (A * B_norm).sum(dim=-1, keepdim=True)
+        return proj_len * B_norm
+    else:
+        # 标量情况
+        B_norm = B / (B.norm() + 1e-8)
+        proj_len = A.dot(B_norm)
+        return proj_len * B_norm
+
+
+
+
+def do_train_stage1(cfg,
+             model,
+             train_loader_stage1,
+             optimizer,
+             scheduler,
+             local_rank):
+    checkpoint_period = cfg.SOLVER.STAGE1.CHECKPOINT_PERIOD
+    device = "cuda"
+    epochs = cfg.SOLVER.STAGE1.MAX_EPOCHS
+    log_period = cfg.SOLVER.STAGE1.LOG_PERIOD 
+
+    logger = logging.getLogger("transreid.train")
+    logger.info('start training')
+    _LOCAL_PROCESS_GROUP = None
+    if device:
+        model.to(local_rank)
+        if torch.cuda.device_count() > 1 and cfg.MODEL.DIST_TRAIN:
+        #if torch.cuda.device_count() > 1 :
+            print('Using {} GPUs for training'.format(torch.cuda.device_count()))
+         #   model = nn.DataParallel(model)  
+            model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], find_unused_parameters=True)
+
+    loss_meter = AverageMeter()
+    scaler = amp.GradScaler()
+    xent = SupConLoss(device)
+    multip=MultiPositiveLoss()
+    plat=PlatformAwareLoss()
+    
+    # train
+    import time
+    from datetime import timedelta
+    all_start_time = time.monotonic()
+    logger.info("model: {}".format(model))
+    image_features = []
+    labels = []
+    platfroms=[]
+    with torch.no_grad():
+        for n_iter, (img, vid, cid,target_cam, target_view) in enumerate(train_loader_stage1):
+            img = img.to(device)
+            target = vid.to(device)
+            target_view=target_view.to(device)
+            target_cam = target_cam.to(device)
+            with amp.autocast(enabled=True):
+                image_feature = model(img, target, get_image = True)
+                for i, j,img_feat in zip(target, target_view,image_feature):
+                    labels.append(i)
+                    platfroms.append(j)
+                    image_features.append(img_feat.cpu())
+        labels_list = torch.stack(labels, dim=0).cuda() #N
+        platfroms_list = torch.stack(platfroms, dim=0).cuda()  # N
+        image_features_list = torch.stack(image_features, dim=0).cuda()
+
+        batch = cfg.SOLVER.STAGE1.IMS_PER_BATCH
+        num_image = labels_list.shape[0]
+        i_ter = num_image // batch
+    del labels, image_features
+
+    for epoch in range(1, epochs + 1):
+        loss_meter.reset()
+        scheduler.step(epoch)
+        model.train()
+
+        iter_list = torch.randperm(num_image).to(device)
+        for i in range(i_ter+1):
+            optimizer.zero_grad()
+            if i != i_ter:
+                b_list = iter_list[i*batch:(i+1)* batch]
+            else:
+                b_list = iter_list[i*batch:num_image]
+            
+            target = labels_list[b_list]
+            plat=platfroms_list[b_list]
+            image_features = image_features_list[b_list]
+            with amp.autocast(enabled=True):
+                text_features = model(label = target, platform=plat,get_text = True)
+ #           import pdb
+ #           pdb.set_trace()
+            pid,plat=text_features[0],text_features[1]
+            proj=compute_projection(pid,plat)
+            id_clean = pid - proj
+            loss_i2t = xent(image_features, id_clean, target, target)
+            loss_t2i = xent(id_clean, image_features, target, target)
+                    # 1. 身份保持损失：去偏置后仍应保持身份
+            sim_id = 1 - F.cosine_similarity(id_clean, pid).mean()
+
+             # 2. 平台排斥损失：与平台特征不相关
+            sim_plat = F.cosine_similarity(id_clean, plat).mean()
+
+           
+            lambda1 = 1.0  #  权重 for ID preservation
+            lambda2 = 0.5  # 权重 for decoupled platform focus
+
+           # 目标：最大化 sim_id 和 sim_plat
+           # 损失：最小化 (1 - sim_id) 和 (1 - sim_plat)
+            loss_sim = lambda1 * sim_id + lambda2 * sim_plat
+#            loss = loss_i2t + loss_t2i+lossjoint
+            loss = loss_i2t + loss_t2i+loss_sim
+
+
+            scaler.scale(loss).backward()
+
+            scaler.step(optimizer)
+            scaler.update()
+
+            loss_meter.update(loss.item(), img.shape[0])
+
+            torch.cuda.synchronize()
+            if (i + 1) % log_period == 0:
+                logger.info("Epoch[{}] Iteration[{}/{}] Loss: {:.3f}, Base Lr: {:.2e}"
+                            .format(epoch, (i + 1), len(train_loader_stage1),
+                                    loss_meter.avg, scheduler._get_lr(epoch)[0]))
+
+        if epoch % checkpoint_period == 0:
+            if cfg.MODEL.DIST_TRAIN:
+                if dist.get_rank() == 0:
+                    torch.save(model.state_dict(),
+                               os.path.join(cfg.OUTPUT_DIR, cfg.MODEL.NAME + '_stage1_{}.pth'.format(epoch)))
+            else:
+                torch.save(model.state_dict(),
+                           os.path.join(cfg.OUTPUT_DIR, cfg.MODEL.NAME + '_stage1_{}.pth'.format(epoch)))
+
+    all_end_time = time.monotonic()
+    total_time = timedelta(seconds=all_end_time - all_start_time)
+    logger.info("Stage1 running time: {}".format(total_time))
